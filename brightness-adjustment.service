@@ -1,0 +1,9 @@
+[Unit]
+Description=Adjust Screen Brightness Based on Ambient Light
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/adjust-brightness.sh
+
+[Install]
+WantedBy=multi-user.target

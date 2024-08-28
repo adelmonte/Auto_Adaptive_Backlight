@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Screen Brightness Adjustment Every 5 Seconds
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
