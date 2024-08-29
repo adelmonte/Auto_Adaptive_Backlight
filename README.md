@@ -9,9 +9,8 @@ You can check if your system has an ambient light sensor with: ```lsmod | grep a
 
 ## Installation
 
-1. Install (and enable) the required dependencies:
+1. Install (and enable) the required dependency:
    ```
-   yay brillo iio-sensor-proxy
    yay iio-sensor-proxy
    
    systemctl enable --now iio-sensor-proxy.service
@@ -80,4 +79,3 @@ If the script doesn't work as expected, check the following:
    ```
    journalctl -u auto-brightness.service
    ```
-4. Try your luck with the Debug Script.
