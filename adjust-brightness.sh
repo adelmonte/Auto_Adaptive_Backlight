@@ -3,9 +3,14 @@
 # Constants
 LIGHT_SENSOR="/sys/bus/iio/devices/iio:device0/in_illuminance_raw"
 BRIGHTNESS_FILE="/tmp/last_set_brightness"
-BRIGHTNESS_DEVICE="/sys/class/backlight/intel_backlight/device/intel_backlight/brightness"
+BRIGHTNESS_DEVICE="/sys/class/backlight/intel_backlight/brightness"
+MAX_BRIGHTNESS_DEVICE="/sys/class/backlight/intel_backlight/max_brightness"
 MANUAL_FLAG_FILE="/tmp/manual_brightness_change"
 MANUAL_TIMEOUT=180  # 3 minutes in seconds
+BRIGHTNESS_THRESHOLD=5  # Minimum brightness change threshold (in percentage)
+
+# Cache max brightness
+MAX_DEVICE_BRIGHTNESS=$(cat "$MAX_BRIGHTNESS_DEVICE")
 
 # Function to get the light level
 get_light_level() {
@@ -14,8 +19,17 @@ get_light_level() {
 
 # Function to set brightness smoothly
 set_brightness_smooth() {
-    local level=$1
-    brillo -u 250000 -S "$level" -e
+    local target=$1
+    local current=$(cat "$BRIGHTNESS_DEVICE")
+    local steps=20
+    local sleep_time=0.05
+    for ((i=1; i<=steps; i++)); do
+        local new_brightness=$((current + (target - current) * i / steps))
+        echo "$new_brightness" > "$BRIGHTNESS_DEVICE"
+        sleep $sleep_time
+    done
+    # Ensure final value is set
+    echo "$target" > "$BRIGHTNESS_DEVICE"
 }
 
 # Function to calculate brightness based on light level
@@ -25,10 +39,10 @@ calculate_brightness() {
     local max_light=800
     local min_brightness=1  # Minimum brightness of 1%
     local max_brightness=100
-
+    
     # Clamp light level within bounds
     light=$(( light < min_light ? min_light : (light > max_light ? max_light : light) ))
-
+    
     # Use a piece-wise function for more natural brightness progression
     local brightness
     if ((light <= 20)); then
@@ -41,11 +55,12 @@ calculate_brightness() {
         # Gradual increase for medium to high light levels
         brightness=$(( 50 + (light - 100) * 50 / 700 ))
     fi
-
+    
     # Ensure brightness is within bounds
     brightness=$(( brightness < min_brightness ? min_brightness : (brightness > max_brightness ? max_brightness : brightness) ))
-
-    echo "$brightness"
+    
+    # Convert percentage to device-specific value
+    echo $((brightness * MAX_DEVICE_BRIGHTNESS / 100))
 }
 
 # Check if the brightness device exists
@@ -54,9 +69,10 @@ if [ ! -f "$BRIGHTNESS_DEVICE" ]; then
 fi
 
 # Get the current brightness
-current_brightness=$(brillo -G | cut -d'.' -f1)
+current_brightness=$(cat "$BRIGHTNESS_DEVICE")
+current_brightness_percent=$((current_brightness * 100 / MAX_DEVICE_BRIGHTNESS))
 
-# Check if manual flag exists and if it's still within the timeout period
+# Check for manual override
 current_time=$(date +%s)
 if [ -f "$MANUAL_FLAG_FILE" ]; then
     manual_time=$(cat "$MANUAL_FLAG_FILE")
@@ -71,9 +87,10 @@ fi
 # Check for manual adjustment
 if [ -f "$BRIGHTNESS_FILE" ]; then
     last_set_brightness=$(cat "$BRIGHTNESS_FILE")
-    if [[ "$current_brightness" != "$last_set_brightness" ]]; then
-        # Check if the difference is significant (e.g., more than 5%)
-        if (( ${current_brightness#-} - ${last_set_brightness#-} > 5 )) || (( ${last_set_brightness#-} - ${current_brightness#-} > 5 )); then
+    last_set_brightness_percent=$((last_set_brightness * 100 / MAX_DEVICE_BRIGHTNESS))
+    if [ "$current_brightness" != "$last_set_brightness" ]; then
+        brightness_diff=$((current_brightness_percent - last_set_brightness_percent))
+        if [ ${brightness_diff#-} -ge $BRIGHTNESS_THRESHOLD ]; then
             echo "$current_time" > "$MANUAL_FLAG_FILE"
             echo "$current_brightness" > "$BRIGHTNESS_FILE"
             exit 0
@@ -83,10 +100,16 @@ else
     echo "$current_brightness" > "$BRIGHTNESS_FILE"
 fi
 
-# Proceed with automatic adjustment
+# Get the light level and calculate the target brightness
 light=$(get_light_level)
 if [ -n "$light" ]; then
-    brightness=$(calculate_brightness "$light")
-    set_brightness_smooth "$brightness"
-    echo "$brightness" > "$BRIGHTNESS_FILE"
+    target_brightness=$(calculate_brightness "$light")
+    target_brightness_percent=$((target_brightness * 100 / MAX_DEVICE_BRIGHTNESS))
+    
+    # Check if the change in brightness is significant
+    brightness_diff=$((target_brightness_percent - current_brightness_percent))
+    if [ ${brightness_diff#-} -ge $BRIGHTNESS_THRESHOLD ]; then
+        set_brightness_smooth "$target_brightness"
+        echo "$target_brightness" > "$BRIGHTNESS_FILE"
+    fi
 fi
