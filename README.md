@@ -4,7 +4,6 @@ Automatically adjust your laptop's screen brightness based on ambient light cond
 ## Dependencies
 You can check if your system has an ambient light sensor with: ```lsmod | grep als```
 
-- `brillo`: Used for smooth brightness adjustments
 - `iio-sensor-proxy`: Ambient Light Sensor Daemon
 
 ## Installation
