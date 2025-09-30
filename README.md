@@ -1,80 +1,110 @@
 # Auto_Adaptive_Backlight
 Automatically adjust your laptop's screen brightness based on ambient light conditions.
 
-## Dependencies
-You can check if your system has an ambient light sensor with: ```lsmod | grep als```
+## Prerequisites
+Check if your system has an ambient light sensor:
+```bash
+lsmod | grep als
+```
 
-- `iio-sensor-proxy`: Ambient Light Sensor Daemon
+Or check for IIO devices:
+```bash
+ls /sys/bus/iio/devices/
+```
+
+If you see `iio:device0` or similar, you have a compatible sensor.
 
 ## Installation
 
-1. Install (and enable) the required dependency:
-   ```
-   yay iio-sensor-proxy
-   
-   systemctl enable --now iio-sensor-proxy.service
-   ```
+1. Copy the script to `/usr/local/bin/auto-brightness.sh`
 
-2. Copy the script to: `/usr/local/bin/auto-brightness.sh`
-
-3. Make the script executable:
-   ```
+2. Make the script executable:
+   ```bash
    sudo chmod +x /usr/local/bin/auto-brightness.sh
    ```
-   
-4. Copy the systemd service file to: `/etc/systemd/system/auto-brightness.service`
 
-5. Copy the systemd timer file to: `/etc/systemd/system/auto-brightness.timer`
+3. Copy the systemd service file to `/etc/systemd/system/auto-brightness.service`
 
-6. Enable and start the timer and service:
-   ```
+4. Copy the systemd timer file to `/etc/systemd/system/auto-brightness.timer`
+
+5. Enable and start the timer and service:
+   ```bash
    sudo systemctl enable --now auto-brightness.timer
    sudo systemctl enable --now auto-brightness.service
    ```
 
-## Configuration
+**Note:** This script reads directly from the kernel's IIO subsystem and requires no additional dependencies.
 
+## Configuration
 The script uses several key variables that you might want to adjust based on your specific laptop model and preferences:
 
-1. `LIGHT_SENSOR`: The path to your laptop's light sensor. 
-   - Current value: `/sys/bus/iio/devices/iio:device0/in_illuminance_raw`
-   - This path may vary depending on your laptop model. You can find the correct path by exploring the `/sys/bus/iio/devices/` directory.
+1. **`LIGHT_SENSOR`**: The path to your laptop's light sensor
+   - Default: `/sys/bus/iio/devices/iio:device0/in_illuminance_raw`
+   - This path may vary depending on your laptop model. Explore `/sys/bus/iio/devices/` to find the correct path.
 
-2. `BRIGHTNESS_DEVICE`: The path to your laptop's brightness control file.
-   - Current value: `/sys/class/backlight/intel_backlight/device/intel_backlight/brightness`
-   - This path may be different for non-Intel graphics cards. Look in `/sys/class/backlight/` for the appropriate directory.
+2. **`BRIGHTNESS_DEVICE`**: The path to your laptop's brightness control file
+   - Default: `/sys/class/backlight/intel_backlight/brightness`
+   - For non-Intel graphics cards, look in `/sys/class/backlight/` for the appropriate directory (e.g., `amdgpu_bl0`, `nvidia_0`).
 
-3. `min_light` and `max_light`: The range of light values your sensor produces.
-   - Current values: 0 and 800
-   - These may need adjustment based on your light sensor's sensitivity and range. I find anything above 800 is extremely bright (flashing torch directly into sensor).
+3. **`min_light` and `max_light`**: The range of light values your sensor produces
+   - Default: 0 and 800
+   - Adjust based on your sensor's range. Test by reading the sensor in different lighting conditions:
+     ```bash
+     watch -n 0.5 cat /sys/bus/iio/devices/iio:device0/in_illuminance_raw
+     ```
 
-4. `min_brightness` and `max_brightness`: The minimum and maximum brightness levels.
-   - Current values: 1 and 100
-   - Adjust these if your laptop's brightness range is different.
+4. **`min_brightness` and `max_brightness`**: The minimum and maximum brightness percentages
+   - Default: 1 and 100
+   - Adjust to your preference (e.g., set `min_brightness` to 10 if 1% is too dim).
 
-5. Brightness calculation function: The `calculate_brightness` function uses a piece-wise approach to map light levels to brightness. You may want to adjust the thresholds and slopes to better suit your preferences and environment.
+5. **Brightness calculation function**: The `calculate_brightness` function uses a piece-wise approach to map light levels to brightness
+   - Adjust the thresholds (20, 100) and multipliers to suit your preferences and environment.
 
-6. `MANUAL_TIMEOUT`: The time (in seconds) that the script will wait after a manual brightness adjustment before resuming automatic control.
-   - Current value: 180 (3 minutes)
-   - Adjust this value based on your preference for how long manual adjustments should persist.
+6. **`MANUAL_TIMEOUT`**: Time (in seconds) to pause automatic adjustments after manual brightness changes
+   - Default: 180 (3 minutes)
+   - Increase if you want manual adjustments to persist longer.
 
-7. (TIMER) `OnUnitActiveSec=5s` The time (in seconds) the script will execute. Increasing this interval will save battery power but will result in delayed brightness adjustments.
+7. **`BRIGHTNESS_THRESHOLD`**: Minimum brightness change percentage to trigger an adjustment
+   - Default: 5%
+   - Reduce for more responsive adjustments; increase to reduce frequent small changes.
 
-Remember to test the script thoroughly after making any changes to ensure it works correctly with your specific hardware.
+8. **Poll interval** (in timer file): `OnUnitActiveSec=5s`
+   - Default: 5 seconds
+   - Increase to 10-15 seconds to reduce CPU wake-ups (negligible impact on battery, slight delay in brightness response).
 
 ## Usage
+Once installed and configured, the script runs automatically every 5 seconds, adjusting your screen brightness based on ambient light while respecting manual adjustments.
 
-Once installed and configured, the script will run automatically every 5 seconds. It will adjust your screen brightness based on the ambient light level, while also respecting manual adjustments for a specified period of time.
-
-To manually override the automatic brightness control, simply adjust your brightness using your laptop's brightness keys. The script will detect this manual change and pause automatic adjustments for the duration specified by `MANUAL_TIMEOUT`.
+To manually override automatic brightness control, simply adjust brightness using your laptop's brightness keys. The script detects this change and pauses automatic adjustments for the duration specified by `MANUAL_TIMEOUT`.
 
 ## Troubleshooting
 
-If the script doesn't work as expected, check the following:
+**Script doesn't adjust brightness:**
+1. Verify the light sensor path is correct:
+   ```bash
+   cat /sys/bus/iio/devices/iio:device0/in_illuminance_raw
+   ```
+   The value should change when you cover/uncover the sensor.
 
-1. Ensure the light sensor path (`LIGHT_SENSOR`) is correct for your laptop.
-2. Verify that the brightness control file path (`BRIGHTNESS_DEVICE`) is correct.
-3. Check the system logs for any error messages:
+2. Verify the brightness control path is correct:
+   ```bash
+   ls /sys/class/backlight/
    ```
-   journalctl -u auto-brightness.service
-   ```
+   Then check: `cat /sys/class/backlight/intel_backlight/brightness`
+
+3. Ensure you have write permissions to the brightness file. The systemd service should run with appropriate privileges.
+
+**Check service logs:**
+```bash
+journalctl -u auto-brightness.service -f
+```
+
+**Test the script manually:**
+```bash
+sudo /usr/local/bin/auto-brightness.sh
+```
+
+**Brightness adjustments are too sensitive/not sensitive enough:**
+- Adjust `BRIGHTNESS_THRESHOLD` (lower = more sensitive)
+- Modify the `calculate_brightness` function thresholds
+- Change the timer interval in `auto-brightness.timer`
